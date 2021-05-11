@@ -1,0 +1,486 @@
+Only in gepard.ex: .DS_Store
+Only in gepard.ex: ._.DS_Store
+diff -ur gepard.ex/.git/config gepard/.git/config
+--- gepard.ex/.git/config	2021-02-03 13:49:32.000000000 +0100
++++ gepard/.git/config	2021-05-11 17:13:56.000000000 +0200
+@@ -1,6 +1,6 @@
+ [core]
+ 	repositoryformatversion = 0
+-	filemode = true
++	filemode = false
+ 	bare = false
+ 	logallrefupdates = true
+ 	ignorecase = true
+Only in gepard/.git/hooks: fsmonitor-watchman.sample
+diff -ur gepard.ex/.git/hooks/pre-commit.sample gepard/.git/hooks/pre-commit.sample
+--- gepard.ex/.git/hooks/pre-commit.sample	2021-02-03 13:49:32.000000000 +0100
++++ gepard/.git/hooks/pre-commit.sample	2021-05-11 17:13:55.000000000 +0200
+@@ -12,11 +12,11 @@
+ 	against=HEAD
+ else
+ 	# Initial commit: diff against an empty tree object
+-	against=4b825dc642cb6eb9a060e54bf8d69288fbee4904
++	against=$(git hash-object -t tree /dev/null)
+ fi
+ 
+ # If you want to allow non-ASCII filenames set this variable to true.
+-allownonascii=$(git config --bool hooks.allownonascii)
++allownonascii=$(git config --type=bool hooks.allownonascii)
+ 
+ # Redirect output to stderr.
+ exec 1>&2
+Only in gepard/.git/hooks: pre-merge-commit.sample
+diff -ur gepard.ex/.git/hooks/pre-push.sample gepard/.git/hooks/pre-push.sample
+--- gepard.ex/.git/hooks/pre-push.sample	2021-02-03 13:49:32.000000000 +0100
++++ gepard/.git/hooks/pre-push.sample	2021-05-11 17:13:55.000000000 +0200
+@@ -14,7 +14,7 @@
+ # Information about the commits which are being pushed is supplied as lines to
+ # the standard input in the form:
+ #
+-#   <local ref> <local sha1> <remote ref> <remote sha1>
++#   <local ref> <local oid> <remote ref> <remote oid>
+ #
+ # This sample shows how to prevent push of commits where the log message starts
+ # with "WIP" (work in progress).
+@@ -22,27 +22,27 @@
+ remote="$1"
+ url="$2"
+ 
+-z40=0000000000000000000000000000000000000000
++zero=$(git hash-object --stdin </dev/null | tr '[0-9a-f]' '0')
+ 
+-while read local_ref local_sha remote_ref remote_sha
++while read local_ref local_oid remote_ref remote_oid
+ do
+-	if [ "$local_sha" = $z40 ]
++	if test "$local_oid" = "$zero"
+ 	then
+ 		# Handle delete
+ 		:
+ 	else
+-		if [ "$remote_sha" = $z40 ]
++		if test "$remote_oid" = "$zero"
+ 		then
+ 			# New branch, examine all commits
+-			range="$local_sha"
++			range="$local_oid"
+ 		else
+ 			# Update to existing branch, examine new commits
+-			range="$remote_sha..$local_sha"
++			range="$remote_oid..$local_oid"
+ 		fi
+ 
+ 		# Check for WIP commit
+-		commit=`git rev-list -n 1 --grep '^WIP' "$range"`
+-		if [ -n "$commit" ]
++		commit=$(git rev-list -n 1 --grep '^WIP' "$range")
++		if test -n "$commit"
+ 		then
+ 			echo >&2 "Found WIP commit in $local_ref, not pushing"
+ 			exit 1
+diff -ur gepard.ex/.git/hooks/pre-rebase.sample gepard/.git/hooks/pre-rebase.sample
+--- gepard.ex/.git/hooks/pre-rebase.sample	2021-02-03 13:49:32.000000000 +0100
++++ gepard/.git/hooks/pre-rebase.sample	2021-05-11 17:13:55.000000000 +0200
+@@ -58,7 +58,7 @@
+ 	not_in_topic=`git rev-list "^$topic" master`
+ 	if test -z "$not_in_topic"
+ 	then
+-		echo >&2 "$topic is already up-to-date with master"
++		echo >&2 "$topic is already up to date with master"
+ 		exit 1 ;# we could allow it, but there is no point.
+ 	else
+ 		exit 0
+@@ -88,9 +88,7 @@
+ 	exit 1
+ fi
+ 
+-exit 0
+-
+-################################################################
++<<\DOC_END
+ 
+ This sample hook safeguards topic branches that have been
+ published from being rewound.
+@@ -167,3 +165,5 @@
+ 	git rev-list master..topic
+ 
+ 	if this is empty, it is fully merged to "master".
++
++DOC_END
+diff -ur gepard.ex/.git/hooks/prepare-commit-msg.sample gepard/.git/hooks/prepare-commit-msg.sample
+--- gepard.ex/.git/hooks/prepare-commit-msg.sample	2021-02-03 13:49:32.000000000 +0100
++++ gepard/.git/hooks/prepare-commit-msg.sample	2021-05-11 17:13:55.000000000 +0200
+@@ -9,8 +9,8 @@
+ #
+ # To enable this hook, rename this file to "prepare-commit-msg".
+ 
+-# This hook includes three examples.  The first comments out the
+-# "Conflicts:" part of a merge commit.
++# This hook includes three examples. The first one removes the
++# "# Please enter the commit message..." help message.
+ #
+ # The second includes the output of "git diff --name-status -r"
+ # into the message, just before the "git status" output.  It is
+@@ -20,17 +20,23 @@
+ # The third example adds a Signed-off-by line to the message, that can
+ # still be edited.  This is rarely a good idea.
+ 
+-case "$2,$3" in
+-  merge,)
+-    /usr/bin/perl -i.bak -ne 's/^/# /, s/^# #/#/ if /^Conflicts/ .. /#/; print' "$1" ;;
++COMMIT_MSG_FILE=$1
++COMMIT_SOURCE=$2
++SHA1=$3
+ 
+-# ,|template,)
+-#   /usr/bin/perl -i.bak -pe '
+-#      print "\n" . `git diff --cached --name-status -r`
+-#	 if /^#/ && $first++ == 0' "$1" ;;
++/usr/bin/perl -i.bak -ne 'print unless(m/^. Please enter the commit message/..m/^#$/)' "$COMMIT_MSG_FILE"
+ 
+-  *) ;;
+-esac
++# case "$COMMIT_SOURCE,$SHA1" in
++#  ,|template,)
++#    /usr/bin/perl -i.bak -pe '
++#       print "\n" . `git diff --cached --name-status -r`
++# 	 if /^#/ && $first++ == 0' "$COMMIT_MSG_FILE" ;;
++#  *) ;;
++# esac
+ 
+-# SOB=$(git var GIT_AUTHOR_IDENT | sed -n 's/^\(.*>\).*$/Signed-off-by: \1/p')
+-# grep -qs "^$SOB" "$1" || echo "$SOB" >> "$1"
++# SOB=$(git var GIT_COMMITTER_IDENT | sed -n 's/^\(.*>\).*$/Signed-off-by: \1/p')
++# git interpret-trailers --in-place --trailer "$SOB" "$COMMIT_MSG_FILE"
++# if test -z "$COMMIT_SOURCE"
++# then
++#   /usr/bin/perl -i.bak -pe 'print "\n" if !$first_line++' "$COMMIT_MSG_FILE"
++# fi
+Only in gepard/.git/hooks: push-to-checkout.sample
+diff -ur gepard.ex/.git/hooks/update.sample gepard/.git/hooks/update.sample
+--- gepard.ex/.git/hooks/update.sample	2021-02-03 13:49:32.000000000 +0100
++++ gepard/.git/hooks/update.sample	2021-05-11 17:13:55.000000000 +0200
+@@ -43,11 +43,11 @@
+ fi
+ 
+ # --- Config
+-allowunannotated=$(git config --bool hooks.allowunannotated)
+-allowdeletebranch=$(git config --bool hooks.allowdeletebranch)
+-denycreatebranch=$(git config --bool hooks.denycreatebranch)
+-allowdeletetag=$(git config --bool hooks.allowdeletetag)
+-allowmodifytag=$(git config --bool hooks.allowmodifytag)
++allowunannotated=$(git config --type=bool hooks.allowunannotated)
++allowdeletebranch=$(git config --type=bool hooks.allowdeletebranch)
++denycreatebranch=$(git config --type=bool hooks.denycreatebranch)
++allowdeletetag=$(git config --type=bool hooks.allowdeletetag)
++allowmodifytag=$(git config --type=bool hooks.allowmodifytag)
+ 
+ # check for no description
+ projectdesc=$(sed -e '1q' "$GIT_DIR/description")
+@@ -60,7 +60,7 @@
+ 
+ # --- Check types
+ # if $newrev is 0000...0000, it's a commit to delete a ref.
+-zero="0000000000000000000000000000000000000000"
++zero=$(git hash-object --stdin </dev/null | tr '[0-9a-f]' '0')
+ if [ "$newrev" = "$zero" ]; then
+ 	newrev_type=delete
+ else
+Binary files gepard.ex/.git/index and gepard/.git/index differ
+diff -ur gepard.ex/.git/logs/HEAD gepard/.git/logs/HEAD
+--- gepard.ex/.git/logs/HEAD	2021-02-03 13:49:32.000000000 +0100
++++ gepard/.git/logs/HEAD	2021-05-11 17:13:56.000000000 +0200
+@@ -1 +1 @@
+-0000000000000000000000000000000000000000 f31e9fc0c01058d8bcc42f64b079b3c3b0bfece6 DESCORPS DECLERE Stéphane <sdescorp@epervier.pf4.pasteur.fr> 1516647782 +0100	clone: from https://github.com/univieCUBE/gepard.git
++0000000000000000000000000000000000000000 f31e9fc0c01058d8bcc42f64b079b3c3b0bfece6 DESCORPS-DECLERE Stéphane <sdeclere@gmail.com> 1620746036 +0200	clone: from https://github.com/univieCUBE/gepard.git
+diff -ur gepard.ex/.git/logs/refs/heads/master gepard/.git/logs/refs/heads/master
+--- gepard.ex/.git/logs/refs/heads/master	2021-02-03 13:49:32.000000000 +0100
++++ gepard/.git/logs/refs/heads/master	2021-05-11 17:13:56.000000000 +0200
+@@ -1 +1 @@
+-0000000000000000000000000000000000000000 f31e9fc0c01058d8bcc42f64b079b3c3b0bfece6 DESCORPS DECLERE Stéphane <sdescorp@epervier.pf4.pasteur.fr> 1516647782 +0100	clone: from https://github.com/univieCUBE/gepard.git
++0000000000000000000000000000000000000000 f31e9fc0c01058d8bcc42f64b079b3c3b0bfece6 DESCORPS-DECLERE Stéphane <sdeclere@gmail.com> 1620746036 +0200	clone: from https://github.com/univieCUBE/gepard.git
+diff -ur gepard.ex/.git/logs/refs/remotes/origin/HEAD gepard/.git/logs/refs/remotes/origin/HEAD
+--- gepard.ex/.git/logs/refs/remotes/origin/HEAD	2021-02-03 13:49:32.000000000 +0100
++++ gepard/.git/logs/refs/remotes/origin/HEAD	2021-05-11 17:13:56.000000000 +0200
+@@ -1 +1 @@
+-0000000000000000000000000000000000000000 f31e9fc0c01058d8bcc42f64b079b3c3b0bfece6 DESCORPS DECLERE Stéphane <sdescorp@epervier.pf4.pasteur.fr> 1516647782 +0100	clone: from https://github.com/univieCUBE/gepard.git
++0000000000000000000000000000000000000000 f31e9fc0c01058d8bcc42f64b079b3c3b0bfece6 DESCORPS-DECLERE Stéphane <sdeclere@gmail.com> 1620746036 +0200	clone: from https://github.com/univieCUBE/gepard.git
+diff -ur gepard.ex/.git/packed-refs gepard/.git/packed-refs
+--- gepard.ex/.git/packed-refs	2021-02-03 13:49:32.000000000 +0100
++++ gepard/.git/packed-refs	2021-05-11 17:13:56.000000000 +0200
+@@ -1,2 +1,3 @@
+-# pack-refs with: peeled fully-peeled 
++# pack-refs with: peeled fully-peeled sorted 
+ f31e9fc0c01058d8bcc42f64b079b3c3b0bfece6 refs/remotes/origin/master
++f31e9fc0c01058d8bcc42f64b079b3c3b0bfece6 refs/tags/v1.40.0
+Only in gepard.ex/src: .DS_Store
+Only in gepard.ex/src: ._.DS_Store
+Only in gepard.ex/src/org: .DS_Store
+Only in gepard.ex/src/org: ._.DS_Store
+Only in gepard.ex/src/org/gepard: .DS_Store
+Only in gepard.ex/src/org/gepard: ._.DS_Store
+Only in gepard.ex/src/org/gepard/client: .DS_Store
+Only in gepard.ex/src/org/gepard/client: ._.DS_Store
+Only in gepard.ex/src/org/gepard/client: ._Plotter.java
+Only in gepard.ex/src/org/gepard/client: ._Tuple.java
+Only in gepard.ex/src/org/gepard/client: AutoParameters.class
+Only in gepard.ex/src/org/gepard/client: BrowserLauncher.class
+Only in gepard.ex/src/org/gepard/client: ClientGlobals.class
+Only in gepard.ex/src/org/gepard/client: Config.class
+Only in gepard.ex/src/org/gepard/client: Controller$1.class
+Only in gepard.ex/src/org/gepard/client: Controller$Pos.class
+Only in gepard.ex/src/org/gepard/client: Controller.class
+Only in gepard.ex/src/org/gepard/client: DotplotInfo.class
+Only in gepard.ex/src/org/gepard/client: DrawTarget.class
+Only in gepard.ex/src/org/gepard/client: GeneNames.class
+Only in gepard.ex/src/org/gepard/client: InvalidParamSetException.class
+Only in gepard.ex/src/org/gepard/client: Plotter.class
+diff -ur gepard.ex/src/org/gepard/client/Plotter.java gepard/src/org/gepard/client/Plotter.java
+--- gepard.ex/src/org/gepard/client/Plotter.java	2018-01-29 18:05:37.000000000 +0100
++++ gepard/src/org/gepard/client/Plotter.java	2021-05-11 17:13:56.000000000 +0200
+@@ -11,13 +11,11 @@
+ import java.text.DecimalFormatSymbols;
+ import java.text.NumberFormat;
+ import java.util.Locale;
+-// stef 
+-import java.util.List;
+-import java.util.ArrayList; 
+ 
+ import org.gepard.common.DotMatrix;
+ 
+ // plots DM objects including information
++
+ public class Plotter {
+ 
+ 	// member variables
+@@ -64,8 +62,6 @@
+ 
+ 	private String genehor;
+ 	private String genevert;
+-	
+-	private List<Tuple> exons = new ArrayList<Tuple>();; 
+ 
+ 	// private Color greyscale[]; // greyscale helper array
+ 
+@@ -82,8 +78,7 @@
+ 		infoWordLen = "Word length: " + dm.getParameterSet().wordLength;
+ 		infoWindowSize = "Window size: " + dm.getParameterSet().windowSize;
+ 		infoSubmat = "Matrix: " + dm.getParameterSet().submatName;
+-		infoProgram = "Program: " + ClientGlobals.APPNAME + " (" + ClientGlobals.VERSION + "h)";
+-		System.out.println(dm.getParameterSet().exons);
++		infoProgram = "Program: " + ClientGlobals.APPNAME + " (" + ClientGlobals.VERSION + ")";
+ 
+ 		NumberFormat fmt = new DecimalFormat("#####0.0000", new DecimalFormatSymbols(Locale.ENGLISH));
+ 		infoGCRatio1 = "GC ratio seq1: " + fmt.format(dm.getGCratio1());
+@@ -143,20 +138,8 @@
+ 
+ 		}
+ 
+-		dp.setPreferredSize(new Dimension(imgWidth, imgHeight));		
+-		
+-		// <stef> parse exons string 
+-		if  (dm.getParameterSet().exons != "" ) {
+-			//exons = new ArrayList<Tuple>();
+-			String[] ex = dm.getParameterSet().exons.split(",");
+-			
+-			for (int i =0; i < ex.length; i++){
+-				String e = ex[i];
+-				String[] ss = e.split(":");
+-				Tuple t = new Tuple(Double.parseDouble(ss[0]), Double.parseDouble(ss[1]) ); 
+-				exons.add(t); 
+-			}
+-		}
++		dp.setPreferredSize(new Dimension(imgWidth, imgHeight));
++
+ 	}
+ 
+ 	// sets the current crosshair position
+@@ -277,7 +260,6 @@
+ 
+ 		// draw first sequence name
+ 		g.drawString(seq1Name, XOFF + (dm.getWidth() / 2) - (fontMetrics.stringWidth(seq1Name) / 2), YOFF - 7);
+-		
+ 		// draw second sequence name, rotated
+ 		Font oldFont = g.getFont();
+ 		Font rotated = getRotatedFont(oldFont);
+@@ -290,7 +272,6 @@
+ 		g.drawString(infoWordLen, XOFF, 43);
+ 		g.drawString(infoWindowSize, XOFF, 58);
+ 		g.drawString(infoSubmat, XOFF, 73);
+-		
+ 		// draw GC ratio (if nucleotide dotplot)
+ 		if (this.dm.isNucleotideMatrix()) {
+ 			g.drawString(infoGCRatio1, XOFF + GC_RATIO_OFF, 43);
+@@ -343,37 +324,6 @@
+ 			g.drawString(crossPosX + ", " + crossPosY, crossX + 5, crossY - 5);
+ 		}
+ 
+-		// stef : draw exons 
+-		if (exons.size() > 0) {
+-	
+-			// draw gene name box
+-			int alpha = 127; // 50% transparent
+-			g.setFont(GENE_FONT);
+-			Color orange = new Color(255, 165, 0, alpha);
+-			g.setColor(orange);
+-			
+-			int slen = dm.getParameterSet().seq1Stop;
+-			float scaleFactor = dm.getWidth()/(float)slen;
+-			System.out.println("slen="  + dm.getParameterSet().seq1Stop);
+-			System.out.println("scale=" + scaleFactor);
+-			
+-			int count =0;
+-			for (Tuple t : exons) {
+-				count++; 
+-				//System.out.println(t);
+-				int start = (int)(t.x*scaleFactor) + XOFF;
+-				//int end   = (int)( ((t.y-t.x)*scaleFactor) > 1 ? ((t.y-t.x)*scaleFactor) : 1); 
+-				int off   = (int)((t.y-t.x)*scaleFactor) ;
+-				// ensure that exons is display even if scalefactor is high 
+-				off = off > 1 ? off : 1; 
+-				
+-				//System.out.println("start=" + start + " off="+ off + " getWidth()=" + dm.getWidth());
+-				if (true) { 
+-					g.fillRect( start, YOFF , off, dm.getHeight()  );
+-				}
+-			}
+-		}
+-		
+ 		// draw gene tool tip
+ 		if (genex > -1) {
+ 
+Only in gepard.ex/src/org/gepard/client: Start.class
+Only in gepard.ex/src/org/gepard/client: SubstMatrixFile.class
+Only in gepard.ex/src/org/gepard/client: SubstMatrixList.class
+Only in gepard.ex/src/org/gepard/client: Tuple.class
+Only in gepard.ex/src/org/gepard/client: Tuple.java
+Only in gepard.ex/src/org/gepard/client/cmdline: ._CommandLine.java
+Only in gepard.ex/src/org/gepard/client/cmdline: CommandLine$1.class
+Only in gepard.ex/src/org/gepard/client/cmdline: CommandLine$Callback.class
+Only in gepard.ex/src/org/gepard/client/cmdline: CommandLine.class
+diff -ur gepard.ex/src/org/gepard/client/cmdline/CommandLine.java gepard/src/org/gepard/client/cmdline/CommandLine.java
+--- gepard.ex/src/org/gepard/client/cmdline/CommandLine.java	2018-01-23 14:02:38.000000000 +0100
++++ gepard/src/org/gepard/client/cmdline/CommandLine.java	2021-05-11 17:13:56.000000000 +0200
+@@ -23,7 +23,7 @@
+ public class CommandLine {
+ 
+ 	private static final String[] ALLOWED_ARGS = new String[] { "seq1", "seq2", "maxwidth", "maxheight", "matrix", "silent", "word", "window", "from1", "to1",
+-			"from2", "to2", "lower", "upper", "greyscale", "outfile", "format", "safile", "sasecondseq", "secondcomp", "zoom", "exons"};
++			"from2", "to2", "lower", "upper", "greyscale", "outfile", "format", "safile", "sasecondseq", "secondcomp", "zoom" };
+ 
+ 	private static final int DEF_WIDTH = 750;
+ 	private static final int DEF_HEIGHT = 750;
+@@ -186,15 +186,8 @@
+ 				greyscale = 0.5f;
+ 		}
+ 
+-		String exons = null; 
+-		if (arguments.isSet("exons")) {
+-			exons = arguments.getValue("exons");
+-		}
+-		else 
+-			exons = "";
+-		
+ 		// get parameter set
+-		ParameterSet params = new ParameterSet(-1, word, window, -1, -1, -1, -1, ClientGlobals.extractFilename(arguments.getValue("matrix").toLowerCase()), exons);
++		ParameterSet params = new ParameterSet(-1, word, window, -1, -1, -1, -1, ClientGlobals.extractFilename(arguments.getValue("matrix").toLowerCase()));
+ 		// set correct coordinates
+ 		try {
+ 			setCoordinates(params, seq1, seq2, arguments);
+@@ -457,9 +450,6 @@
+ 		System.err.println("Miscellaneous:");
+ 		System.err.println("  -silent       generate no output (except error messages)");
+ 		System.err.println();
+-		System.err.println("Hacked by <stef>:");
+-		System.err.println("  -exons       draw a set of segements over the dotplot <start:end, start:end...>");
+-		System.err.println();
+ 
+ 	}
+ 
+Only in gepard.ex/src/org/gepard/client/cmdline: CommandLineArguments.class
+Only in gepard.ex/src/org/gepard/client/cmdline: InvalidArgumentsException.class
+Only in gepard.ex/src/org/gepard/client/userinterface: AboutDialog.class
+Only in gepard.ex/src/org/gepard/client/userinterface: ContainerWindow$1.class
+Only in gepard.ex/src/org/gepard/client/userinterface: ContainerWindow.class
+Only in gepard.ex/src/org/gepard/client/userinterface: ControlPanel$FileChooseResult.class
+Only in gepard.ex/src/org/gepard/client/userinterface: ControlPanel$IntVerifier.class
+Only in gepard.ex/src/org/gepard/client/userinterface: ControlPanel.class
+Only in gepard.ex/src/org/gepard/client/userinterface: CustomComboBox.class
+Only in gepard.ex/src/org/gepard/client/userinterface: DrawPanel$1.class
+Only in gepard.ex/src/org/gepard/client/userinterface: DrawPanel$2.class
+Only in gepard.ex/src/org/gepard/client/userinterface: DrawPanel$3.class
+Only in gepard.ex/src/org/gepard/client/userinterface: DrawPanel.class
+Only in gepard.ex/src/org/gepard/client/userinterface: ExampleFileFilter.class
+Only in gepard.ex/src/org/gepard/client/userinterface: HelpTexts.class
+Only in gepard.ex/src/org/gepard/client/userinterface: InfoPanel$1.class
+Only in gepard.ex/src/org/gepard/client/userinterface: InfoPanel$EndFlashTimer.class
+Only in gepard.ex/src/org/gepard/client/userinterface: InfoPanel.class
+Only in gepard.ex/src/org/gepard/client/userinterface: MainPanel.class
+Only in gepard.ex/src/org/gepard/client/userinterface: ProxyDialog.class
+Only in gepard.ex/src/org/gepard/client/userinterface: StatusDialog$1.class
+Only in gepard.ex/src/org/gepard/client/userinterface: StatusDialog$2.class
+Only in gepard.ex/src/org/gepard/client/userinterface: StatusDialog.class
+Only in gepard.ex/src/org/gepard/client/userinterface: UserMessageDialog.class
+Only in gepard.ex/src/org/gepard/client/userinterface: WindowPos.class
+Only in gepard.ex/src/org/gepard/common: ._DotMatrix.java
+Only in gepard.ex/src/org/gepard/common: ._ParameterSet.java
+Only in gepard.ex/src/org/gepard/common: AbortionChecker.class
+Only in gepard.ex/src/org/gepard/common: Base64$InputStream.class
+Only in gepard.ex/src/org/gepard/common: Base64$OutputStream.class
+Only in gepard.ex/src/org/gepard/common: Base64.class
+Only in gepard.ex/src/org/gepard/common: CompressedDotMatrix.class
+Only in gepard.ex/src/org/gepard/common: Compression.class
+Only in gepard.ex/src/org/gepard/common: DotMatrix.class
+Only in gepard.ex/src/org/gepard/common: DotMatrixCallback.class
+Only in gepard.ex/src/org/gepard/common: FASTAReader.class
+Only in gepard.ex/src/org/gepard/common: FASTAWriter.class
+Only in gepard.ex/src/org/gepard/common: GenSAFile.class
+Only in gepard.ex/src/org/gepard/common: GenSAFileVmatch.class
+Only in gepard.ex/src/org/gepard/common: InvalidFASTAFileException.class
+Only in gepard.ex/src/org/gepard/common: InvalidSubMatFileException.class
+Only in gepard.ex/src/org/gepard/common: LEDataInputStream.class
+Only in gepard.ex/src/org/gepard/common: LEDataOutputStream.class
+Only in gepard.ex/src/org/gepard/common: ParameterSet.class
+diff -ur gepard.ex/src/org/gepard/common/ParameterSet.java gepard/src/org/gepard/common/ParameterSet.java
+--- gepard.ex/src/org/gepard/common/ParameterSet.java	2018-01-23 14:03:08.000000000 +0100
++++ gepard/src/org/gepard/common/ParameterSet.java	2021-05-11 17:13:56.000000000 +0200
+@@ -14,14 +14,12 @@
+ 	public int seq1Start, seq1Stop;
+ 	public int seq2Start, seq2Stop;
+ 	public String submatName;
+-	// stef
+-	public String exons; 
+ 	
+ 	
+ 	private static final String paramDivider = "&";
+ 
+ 	public ParameterSet(int iratio, int iwordlen, int iwinsize, int iseq1start,
+-			int iseq1stop, int iseq2start, int iseq2stop, String submatName, String exons) {
++			int iseq1stop, int iseq2start, int iseq2stop, String submatName) {
+ 		
+ 		this.zoom = iratio;
+ 		this.wordLength = iwordlen;
+@@ -31,8 +29,6 @@
+ 		this.seq2Start = iseq2start;
+ 		this.seq2Stop = iseq2stop;
+ 		this.submatName = submatName;
+-		// stef 
+-		this.exons = exons; 
+ 	}
+ 	
+ 	
+@@ -42,7 +38,7 @@
+ 
+ 	public ParameterSet getClone() {
+ 		return new ParameterSet(zoom, wordLength, windowSize, seq1Start,
+-				seq1Stop, seq2Start, seq2Stop, submatName, exons);
++				seq1Stop, seq2Start, seq2Stop, submatName);
+ 	}
+ 	
+ 	public String serialize() {
+Only in gepard.ex/src/org/gepard/common: SAXFinishedException.class
+Only in gepard.ex/src/org/gepard/common: Sequence.class
+Only in gepard.ex/src/org/gepard/common: SubstitutionMatrix.class
+Only in gepard.ex/src/org/gepard/common: SuffixArray$BigLCP.class
+Only in gepard.ex/src/org/gepard/common: SuffixArray.class
+Only in gepard.ex/src/org/gepard/common: VmatchConverter.class
